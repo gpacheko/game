@@ -1,0 +1,228 @@
+/* Scss Document */
+$world-size: 500px;
+$cell-count: 100;
+$cells-per-row: 10;
+$frame-count: 32;
+$framerate: 10;
+$initial-frame: (
+  0 0 1 0 0 0 0 0 0 0
+  1 0 1 0 0 0 0 0 0 0
+  0 1 1 0 0 0 0 0 0 0
+  0 0 0 0 0 0 0 0 0 0
+  0 0 0 0 0 0 0 0 0 0
+  0 0 0 0 0 0 0 0 0 0
+  0 0 0 0 0 0 0 0 0 0
+  0 0 0 0 0 0 0 0 0 0
+  0 0 0 0 0 0 0 0 0 0
+  0 0 0 0 0 0 0 0 0 0
+);
+
+// A "timeline" is a defined series of states that a single cell can undergo.
+// A "frame" is the state of a cell or the world at one point in time. Also known as a "generation".
+
+@function total-time () {
+  @return #{$frame-count/$framerate}s;
+}
+$alive: 1;
+$dead: 0;
+
+@mixin alive {
+  background: black;
+}
+
+@mixin dead {
+  background: white;
+}
+
+$timelines: (); // Map of timelines to unique CSS identifiers.
+@function timeline-id-for-frames ($frames) {
+  @if not map-has-key($timelines, $frames) {
+    $timelines: map-merge($timelines, ($frames: unique-id())) !global;
+  }
+  @return map-get($timelines, $frames);
+}
+
+@mixin cell-animation ($timeline-id) {
+  animation: $timeline-id total-time() step-start forwards;
+}
+
+@mixin cell-style ($cell) {
+  @if $cell == $dead {
+    @include dead;
+  } @else if $cell == $alive {
+    @include alive;
+  }
+}
+
+@mixin timeline-keyframe ($frame, $index) {
+  #{($index / $frame-count) * 100}% {
+    @include cell-style($frame);
+  }
+}
+
+// Defines CSS keyframes for a given timeline.
+@mixin timeline-keyframes ($frames) {
+  $last-frame: -1;
+  @keyframes #{timeline-id-for-frames($frames)} {
+    // Loop backwards, so we have the 100% keyframe required by the forwards fill-mode.
+    $i: $frame-count;
+    @while $i > 0 {
+      $current-frame: nth($frames, $i);
+      @if $current-frame != $last-frame {
+        @include timeline-keyframe($current-frame, $i);
+        $last-frame: $current-frame;
+      }
+      $i: $i - 1;
+    }
+  }
+}
+
+@mixin keyframes-for-all-timelines {
+  @each $timeline in map-keys($timelines) {
+    @include timeline-keyframes($timeline);
+  }
+}
+
+@mixin page-styles {
+  body {
+    display: flex;
+    flex-wrap: wrap;
+    width: $world-size;
+  }
+
+  body, div {
+    border: 1px solid #AAA;
+  }
+
+  div {
+    box-sizing: border-box;
+    width: $world-size / $cells-per-row;
+    height: $world-size / $cells-per-row;
+  }
+}
+
+@mixin style-cells ($cells) {
+  $selector: '';
+  @each $cell in $cells {
+    $selector: $selector + 'div:nth-child(' + $cell + '),';
+  }
+  #{$selector} {
+    @content;
+  }
+}
+
+// Converts an array of timelines (where index is cell index) into a map of timeline IDs to lists of cell indices that use that timeline.
+@function cell-timelines-to-timeline-map ($cell-timelines) {
+  $cells-for-timelines: ();
+  @for $cell-index from 1 through length($cell-timelines) {
+    $timeline-id: timeline-id-for-frames(nth($cell-timelines, $cell-index));
+    $cells-with-timeline: ();
+    @if (map-has-key($cells-for-timelines, $timeline-id)) {
+      $cells-with-timeline: append(map-get($cells-for-timelines, $timeline-id), $cell-index);
+    } @else {
+      $cells-with-timeline: append((), $cell-index);
+    }
+    $cells-for-timelines: map-merge($cells-for-timelines, ($timeline-id: $cells-with-timeline));
+  }
+  @return $cells-for-timelines;
+}
+
+@mixin animations-for-each-cell ($cell-timelines) {
+  $cells-for-timelines: cell-timelines-to-timeline-map($cell-timelines);
+
+  @each $timeline-id, $cells-with-timeline in $cells-for-timelines {
+    @include style-cells($cells-with-timeline) {
+      @include cell-animation($timeline-id);
+    }
+  }
+}
+
+@function pivot-to-timelines ($world-frames) {
+  $all-timelines: ();
+  @for $cell-index from 1 through $cell-count {
+    $current-timeline: ();
+    @for $frame-index from 1 through length($world-frames) {
+      $current-timeline: append($current-timeline, nth(nth($world-frames, $frame-index), $cell-index));
+    }
+    $all-timelines: append($all-timelines, $current-timeline);
+  }
+  @return $all-timelines;
+}
+
+@function count-neighbors ($world-frame, $cell-index) {
+  $count: 0;
+  $x: (($cell-index - 1) % $cells-per-row);
+  $y: floor((($cell-index - 1) / $cells-per-row));
+  $left-edge: $x == 0;
+  $right-edge: $x == ($cells-per-row - 1);
+  $top-edge: $y == 0;
+  $bottom-edge: $y == (($cell-count / $cells-per-row) - 1);
+
+  @if not $top-edge {
+    @if not $left-edge {
+      $count: $count + nth($world-frame, $cell-index - $cells-per-row - 1); // up-left
+    }
+    $count: $count + nth($world-frame, $cell-index - $cells-per-row); // up
+    @if not $right-edge {
+      $count: $count + nth($world-frame, $cell-index - $cells-per-row + 1); // up-right
+    }
+  }
+  @if not $left-edge {
+    $count: $count + nth($world-frame, $cell-index - 1); // left
+  }
+  @if not $right-edge {
+    $count: $count + nth($world-frame, $cell-index + 1); // right
+  }
+  @if not $bottom-edge {
+    @if not $left-edge {
+      $count: $count + nth($world-frame, $cell-index + $cells-per-row - 1); // down-left
+    }
+    $count: $count + nth($world-frame, $cell-index + $cells-per-row); // down
+    @if not $right-edge {
+      $count: $count + nth($world-frame, $cell-index + $cells-per-row + 1); // down-right
+    }
+  }
+
+  @return $count;
+}
+
+@function calculate-next-frame ($frame) {
+  $next-frame: ();
+  @for $cell-index from 1 through $cell-count {
+    $cell: nth($frame, $cell-index);
+    $neighbor-count: count-neighbors($frame, $cell-index);
+
+    @if $cell == $alive {
+      @if $neighbor-count < 2 or $neighbor-count > 3 {
+        $next-frame: append($next-frame, $dead);
+      } @else {
+        $next-frame: append($next-frame, $alive);
+      }
+    } @else if $cell == $dead and $neighbor-count == 3 {
+      $next-frame: append($next-frame, $alive);
+    } @else {
+      $next-frame: append($next-frame, $dead);
+    }
+  }
+  @return $next-frame;
+}
+
+@function calculate-all-timelines ($initial-frame) {
+  $frames: append((), $initial-frame);
+  $previous-frame: $initial-frame;
+
+  @for $frame-index from 2 through $frame-count {
+    $current-frame: calculate-next-frame($previous-frame);
+    $frames: append($frames, $current-frame);
+    $previous-frame: $current-frame;
+  }
+
+  @return pivot-to-timelines($frames);
+}
+
+
+@include page-styles;
+
+$cell-timelines: calculate-all-timelines($initial-frame);
+@include animations-for-each-cell($cell-timelines);
+@include keyframes-for-all-timelines;
